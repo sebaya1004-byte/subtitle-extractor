@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: subtitle-extractor
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false

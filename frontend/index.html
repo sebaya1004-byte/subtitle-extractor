@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>영상 자막 추출기</title>
+<style>
+  :root {
+    --bg: #f7f7f8;
+    --card: #ffffff;
+    --border: #e3e3e6;
+    --text: #1c1c1e;
+    --sub: #6b6b70;
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --danger: #dc2626;
+    --ok: #16a34a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Pretendard", "Apple SD Gothic Neo", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .wrap {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+  }
+  header { margin-bottom: 28px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--sub); font-size: 14px; }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+
+  #dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  #dropzone.dragover {
+    border-color: var(--accent);
+    background: #f5f4ff;
+  }
+  #dropzone p { margin: 6px 0; }
+  #dropzone .hint { color: var(--sub); font-size: 13px; }
+  #fileInput { display: none; }
+
+  .progress-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 4px;
+  }
+  .progress-bar-bg {
+    flex: 1;
+    height: 8px;
+    background: #eee;
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--accent);
+    transition: width 0.3s ease;
+  }
+  #statusText { font-size: 13px; color: var(--sub); margin-top: 8px; }
+  #errorText { font-size: 13px; color: var(--danger); margin-top: 8px; display: none; }
+
+  .result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .filename { font-weight: 600; font-size: 15px; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    font-family: inherit;
+    font-size: 13px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: #fff;
+    padding: 8px 14px;
+    cursor: pointer;
+    color: var(--text);
+  }
+  button:hover { background: #f2f2f4; }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  button.primary:hover { background: var(--accent-hover); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .segment {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .segment:last-child { border-bottom: none; }
+  .seg-time {
+    font-size: 12px;
+    color: var(--sub);
+    padding-top: 8px;
+    white-space: nowrap;
+  }
+  .seg-text {
+    width: 100%;
+    min-height: 40px;
+    resize: vertical;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+    font-family: inherit;
+    background: transparent;
+  }
+  .seg-text:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: #fafaff;
+  }
+  #segmentsBox { max-height: 520px; overflow-y: auto; margin-top: 4px; }
+
+  .empty-hint { color: var(--sub); font-size: 13px; text-align: center; padding: 20px 0; }
+  #resultCard { display: none; }
+  .save-hint { font-size: 12px; color: var(--sub); margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🎬 영상 자막 추출기</h1>
+    <div class="sub">영상을 업로드하면 자동으로 자막(타임스탬프 포함)을 추출합니다.</div>
+  </header>
+
+  <div class="card">
+    <div id="dropzone">
+      <p><strong>클릭하거나 영상을 이곳에 드래그하세요</strong></p>
+      <p class="hint">mp4, mov, mkv, m4a 등 ffmpeg가 지원하는 대부분의 영상/오디오 파일</p>
+      <input type="file" id="fileInput" accept="video/*,audio/*" />
+    </div>
+
+    <div id="progressArea" style="display:none; margin-top: 18px;">
+      <div class="progress-row">
+        <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+        <div id="progressPercent" style="font-size:13px; color:var(--sub); width:40px; text-align:right;">0%</div>
+      </div>
+      <div id="statusText">대기 중...</div>
+      <div id="errorText"></div>
+    </div>
+  </div>
+
+  <div class="card" id="resultCard">
+    <div class="result-header">
+      <div class="filename" id="resultFilename"></div>
+      <div class="btns">
+        <button id="downloadSrt">SRT 다운로드</button>
+        <button id="downloadVtt">VTT 다운로드</button>
+        <button id="downloadTxt">TXT 다운로드</button>
+        <button id="copyAll" class="primary">전체 텍스트 복사</button>
+      </div>
+    </div>
+    <div id="segmentsBox"></div>
+    <div class="save-hint">자막 내용을 직접 수정할 수 있습니다. 수정 후 다운로드하면 수정된 내용이 반영됩니다.</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('fileInput');
+  const progressArea = document.getElementById('progressArea');
+  const progressFill = document.getElementById('progressFill');
+  const progressPercent = document.getElementById('progressPercent');
+  const statusText = document.getElementById('statusText');
+  const errorText = document.getElementById('errorText');
+  const resultCard = document.getElementById('resultCard');
+  const resultFilename = document.getElementById('resultFilename');
+  const segmentsBox = document.getElementById('segmentsBox');
+
+  let currentSegments = [];
+  let currentJobId = null;
+  let currentBaseName = 'subtitle';
+  let pollTimer = null;
+
+  function fmtTime(sec) {
+    sec = Math.max(0, Math.floor(sec));
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+  }
+
+  function srtTime(sec) {
+    sec = Math.max(0, sec);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    const ms = Math.round((sec - Math.floor(sec)) * 1000);
+    const pad = (n, l=2) => String(n).padStart(l, '0');
+    return `${pad(h)}:${pad(m)}:${pad(s)},${pad(ms,3)}`;
+  }
+  function vttTime(sec) { return srtTime(sec).replace(',', '.'); }
+
+  function buildSrt(segments) {
+    return segments.map((seg, i) =>
+      `${i + 1}\n${srtTime(seg.start)} --> ${srtTime(seg.end)}\n${seg.text.trim()}\n`
+    ).join('\n');
+  }
+  function buildVtt(segments) {
+    return 'WEBVTT\n\n' + segments.map((seg) =>
+      `${vttTime(seg.start)} --> ${vttTime(seg.end)}\n${seg.text.trim()}\n`
+    ).join('\n');
+  }
+  function buildTxt(segments) {
+    return segments.map((seg) => seg.text.trim()).join('\n');
+  }
+
+  function downloadBlob(content, filename, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  function renderSegments(segments) {
+    segmentsBox.innerHTML = '';
+    if (!segments.length) {
+      segmentsBox.innerHTML = '<div class="empty-hint">추출된 자막이 없습니다.</div>';
+      return;
+    }
+    segments.forEach((seg, idx) => {
+      const row = document.createElement('div');
+      row.className = 'segment';
+
+      const time = document.createElement('div');
+      time.className = 'seg-time';
+      time.textContent = `${fmtTime(seg.start)} → ${fmtTime(seg.end)}`;
+
+      const textarea = document.createElement('textarea');
+      textarea.className = 'seg-text';
+      textarea.value = seg.text;
+      textarea.rows = 1;
+      textarea.addEventListener('input', () => {
+        currentSegments[idx].text = textarea.value;
+      });
+
+      row.appendChild(time);
+      row.appendChild(textarea);
+      segmentsBox.appendChild(row);
+    });
+  }
+
+  function setProgress(pct, msg) {
+    progressFill.style.width = pct + '%';
+    progressPercent.textContent = pct + '%';
+    statusText.textContent = msg || '';
+  }
+
+  async function pollJob(jobId) {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      if (!res.ok) throw new Error('작업 상태를 가져오지 못했습니다.');
+      const job = await res.json();
+
+      if (job.status === 'error') {
+        errorText.style.display = 'block';
+        errorText.textContent = '오류: ' + job.message;
+        clearInterval(pollTimer);
+        return;
+      }
+
+      setProgress(job.progress || 0, job.message || '');
+
+      if (job.status === 'done') {
+        clearInterval(pollTimer);
+        currentSegments = (job.segments || []).map((s) => ({ ...s }));
+        resultFilename.textContent = job.filename || '';
+        currentBaseName = (job.filename || 'subtitle').replace(/\.[^/.]+$/, '') || 'subtitle';
+        renderSegments(currentSegments);
+        resultCard.style.display = 'block';
+      }
+    } catch (e) {
+      errorText.style.display = 'block';
+      errorText.textContent = '오류: ' + e.message;
+      clearInterval(pollTimer);
+    }
+  }
+
+  async function uploadFile(file) {
+    errorText.style.display = 'none';
+    resultCard.style.display = 'none';
+    progressArea.style.display = 'block';
+    setProgress(0, '업로드 중...');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.detail || '업로드 실패');
+      }
+      const data = await res.json();
+      currentJobId = data.job_id;
+      setProgress(2, '대기 중...');
+      pollTimer = setInterval(() => pollJob(currentJobId), 1500);
+    } catch (e) {
+      errorText.style.display = 'block';
+      errorText.textContent = '오류: ' + e.message;
+    }
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+  dropzone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) uploadFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length) uploadFile(fileInput.files[0]);
+  });
+
+  document.getElementById('downloadSrt').addEventListener('click', () => {
+    downloadBlob(buildSrt(currentSegments), `${currentBaseName}.srt`, 'application/x-subrip');
+  });
+  document.getElementById('downloadVtt').addEventListener('click', () => {
+    downloadBlob(buildVtt(currentSegments), `${currentBaseName}.vtt`, 'text/vtt');
+  });
+  document.getElementById('downloadTxt').addEventListener('click', () => {
+    downloadBlob(buildTxt(currentSegments), `${currentBaseName}.txt`, 'text/plain');
+  });
+  document.getElementById('copyAll').addEventListener('click', async () => {
+    const text = buildTxt(currentSegments);
+    try {
+      await navigator.clipboard.writeText(text);
+      const btn = document.getElementById('copyAll');
+      const original = btn.textContent;
+      btn.textContent = '복사됨!';
+      setTimeout(() => (btn.textContent = original), 1200);
+    } catch (e) {
+      alert('복사에 실패했습니다. 직접 선택해서 복사해주세요.');
+    }
+  });
+})();
+</script>
+</body>
+</html>
