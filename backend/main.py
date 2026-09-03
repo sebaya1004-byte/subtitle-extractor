@@ -27,6 +27,7 @@ FastAPI 백엔드:
 """
 
 import json
+import logging
 import math
 import os
 import shutil
@@ -44,6 +45,9 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logger = logging.getLogger("subtitle_extractor")
 
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR = APP_DIR / "data"
@@ -622,6 +626,7 @@ def process_job(job_id: str, source_path: Path, source_type: str):
         try:
             extract_audio(source_path, audio_path)
         except Exception as e:  # noqa: BLE001
+            logger.exception("job %s: extract_audio 실패", job_id)
             raise StageError(2, "영상에서 오디오를 추출하지 못했습니다.") from e
 
         update_job(
@@ -634,12 +639,14 @@ def process_job(job_id: str, source_path: Path, source_type: str):
         try:
             chunks = split_audio(audio_path, chunks_dir)
         except Exception as e:  # noqa: BLE001
+            logger.exception("job %s: split_audio 실패", job_id)
             raise StageError(2, "오디오 분할에 실패했습니다.") from e
 
         # ---- STEP 3: 음성을 텍스트로 변환 (Whisper API, 파일당 1회) ----
         try:
             client = get_client()
         except Exception as e:  # noqa: BLE001
+            logger.exception("job %s: get_client 실패", job_id)
             raise StageError(3, str(e)) from e
 
         all_segments: list[dict] = []
@@ -665,6 +672,7 @@ def process_job(job_id: str, source_path: Path, source_type: str):
                         timestamp_granularities=["segment", "word"],
                     )
             except Exception as e:  # noqa: BLE001
+                logger.exception("job %s: whisper transcription 실패 (chunk %s/%s)", job_id, idx + 1, total)
                 raise StageError(3, friendly_whisper_error(e)) from e
 
             segments = getattr(resp, "segments", None)
@@ -791,6 +799,7 @@ def process_job(job_id: str, source_path: Path, source_type: str):
     except StageError as e:
         update_job(job_id, status="error", failed_step=e.step, message=e.message)
     except Exception:  # noqa: BLE001
+        logger.exception("job %s: process_job에서 처리되지 않은 예외", job_id)
         update_job(job_id, status="error", failed_step=3, message="음성 인식에 실패했습니다.")
     finally:
         # 원본 업로드 파일은 처리 후 삭제하여 디스크 공간 절약
@@ -830,6 +839,7 @@ def process_captions_job(job_id: str, spoken_max_lines: int = 1, spoken_max_char
         try:
             point_captions = generate_point_captions(transcript)
         except Exception as e:  # noqa: BLE001
+            logger.exception("job %s: generate_point_captions 실패", job_id)
             raise StageError(5, friendly_text_ai_error(e)) from e
 
         update_job(
@@ -842,6 +852,7 @@ def process_captions_job(job_id: str, spoken_max_lines: int = 1, spoken_max_char
     except StageError as e:
         update_job(job_id, status="error", failed_step=e.step, message=e.message)
     except Exception:  # noqa: BLE001
+        logger.exception("job %s: process_captions_job에서 처리되지 않은 예외", job_id)
         update_job(job_id, status="error", failed_step=5, message="AI 자막 생성에 실패했습니다.")
 
 
